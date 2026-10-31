@@ -1,145 +1,35 @@
-import { useEffect, useRef, useState } from "react";
-import { AudioLines, Disc3, FolderOpen, Headphones, Music2, Pause, Play, Plus, Radio, Search, Settings2, SkipBack, Volume2, Zap } from "lucide-react";
-
-type Track = { name: string; url: string; path?: string };
-declare global {
-  interface Window {
-    desktopAPI?: {
-      chooseFiles: () => Promise<Track[]>;
-      version: () => Promise<string>;
-    };
-  }
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AudioLines, Disc3, FolderOpen, Headphones, Music2, Pause, Play, Plus, Radio, Search, Settings2, SkipBack, SlidersHorizontal, Repeat2, Waves, Heart, ListMusic, Clock3, Sparkles, Zap } from "lucide-react";
+type Track={name:string;url:string;path?:string}; type DeckId="A"|"B";
+declare global { interface Window { desktopAPI?: { chooseFiles:()=>Promise<Track[]>; version:()=>Promise<string> } } }
+const fmt=(n:number)=>Number.isFinite(n)?Math.floor(n/60)+":"+String(Math.floor(n%60)).padStart(2,"0"):"0:00";
+function Deck(p:{id:DeckId;track?:Track;bpm:number;peerBpm:number;onBpmChange:(n:number)=>void;onSync:()=>void;outputGain:number;onLoad:()=>void}){
+ const audio=useRef<HTMLAudioElement>(null); const [playing,setPlaying]=useState(false); const [pos,setPos]=useState(0); const [duration,setDuration]=useState(0); const [base,setBase]=useState(128); const [volume,setVolume]=useState(85); const [cue,setCue]=useState(0); const [loop,setLoop]=useState(false);
+ const color=p.id==="A"?"blue":"pink"; const speed=p.bpm/Math.max(1,base); const bars=useMemo(()=>Array.from({length:112},(_,i)=>18+((i*47+(p.id==="A"?17:31)+(i%7)*13)%78)),[p.id]);
+ useEffect(()=>{if(audio.current){audio.current.playbackRate=Math.max(.5,Math.min(2,speed));audio.current.volume=Math.max(0,Math.min(1,volume/100*p.outputGain));}},[speed,volume,p.outputGain,p.track]);
+ useEffect(()=>{const el=audio.current;if(!el)return;const update=()=>{setPos(el.currentTime);if(loop&&el.currentTime>=cue+2)el.currentTime=cue};const meta=()=>setDuration(el.duration||0);const ended=()=>setPlaying(false);el.addEventListener("timeupdate",update);el.addEventListener("loadedmetadata",meta);el.addEventListener("ended",ended);return()=>{el.removeEventListener("timeupdate",update);el.removeEventListener("loadedmetadata",meta);el.removeEventListener("ended",ended)}},[loop,cue]);
+ const seek=(n:number)=>{if(audio.current)audio.current.currentTime=n;setPos(n)};
+ const toggle=async()=>{if(!audio.current||!p.track)return;if(audio.current.paused){try{await audio.current.play();setPlaying(true)}catch{setPlaying(false)}}else{audio.current.pause();setPlaying(false)}};
+ return <section className={"deck deck-"+color}><audio ref={audio} src={p.track?.url} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)}/>
+ <div className="deck-topline"><div className="deck-id">{p.id}</div><div className="track-heading"><span className="eyebrow">PLAYER DECK</span><strong>{p.track?.name||"Load a track"}</strong><small>{p.track?"LOCAL AUDIO FILE":"MP3 · WAV · FLAC · M4A · OGG"}</small></div><div className="bpm-readout"><strong>{p.bpm.toFixed(1)}</strong><span>BPM</span><small>{((speed-1)*100).toFixed(1)}%</small></div></div>
+ <div className="wave-panel"><div className="wave-ruler"><span>00:00</span><span>WAVEFORM</span><span>{fmt(duration)}</span></div><div className="waveform">{bars.map((h,i)=><i key={i} style={{height:h+"%",opacity:duration&&i/bars.length<pos/duration?1:.48}}/>)}<span className="playhead" style={{left:(duration?pos/duration*100:0)+"%"}}/></div><div className="timeline"><span>{fmt(pos)}</span><input type="range" min="0" max={duration||100} step=".1" value={Math.min(pos,duration||100)} onChange={e=>seek(Number(e.target.value))}/><span>{fmt(duration)}</span></div></div>
+ <div className="transport"><button className="hardware-btn" onClick={()=>{if(playing)seek(cue);else setCue(pos)}}><Radio size={15}/> CUE</button><button className="play-btn" disabled={!p.track} onClick={toggle}>{playing?<Pause size={19} fill="currentColor"/>:<Play size={19} fill="currentColor"/>}</button><button className={"hardware-btn "+(loop?"active":"")} onClick={()=>setLoop(v=>!v)}><Repeat2 size={14}/> LOOP</button><button className="sync-btn" onClick={p.onSync}><Waves size={14}/> SYNC</button><button className="load-btn" onClick={p.onLoad}><FolderOpen size={14}/> LOAD</button></div>
+ <div className="deck-controls"><div className="control-block"><label>TRACK BPM <b>{base}</b></label><input type="range" min="60" max="200" value={base} onChange={e=>{setBase(Number(e.target.value));p.onBpmChange(Number(e.target.value))}}/><small>Set original BPM</small></div><div className="control-block"><label>TEMPO <b>{((speed-1)*100).toFixed(1)}%</b></label><input type="range" min={Math.max(60,base*.8)} max={Math.min(200,base*1.2)} value={p.bpm} onChange={e=>p.onBpmChange(Number(e.target.value))}/><small>Playback speed</small></div><div className="control-block"><label>CHANNEL <b>{volume}%</b></label><input type="range" min="0" max="100" value={volume} onChange={e=>setVolume(Number(e.target.value))}/><small>Deck output level</small></div></div>
+ <div className="eq-strip">{["LOW","MID","HIGH"].map(x=><label key={x}>{x}<input type="range" min="0" max="100" defaultValue="50"/></label>)}</div></section>
 }
-
-function Deck({ label, accent, track, onLoad, onTrackEnd }: {
-  label: string; accent: "cyan" | "violet"; track?: Track;
-  onLoad: () => void; onTrackEnd?: () => void;
-}) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [tempo, setTempo] = useState(1);
-  const [volume, setVolume] = useState(80);
-  const [eq, setEq] = useState([50, 50, 50]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.playbackRate = tempo;
-    audio.volume = volume / 100;
-  }, [tempo, volume, track]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const update = () => setProgress(audio.currentTime);
-    const loaded = () => setDuration(audio.duration || 0);
-    audio.addEventListener("timeupdate", update);
-    audio.addEventListener("loadedmetadata", loaded);
-    audio.addEventListener("ended", () => { setPlaying(false); onTrackEnd?.(); });
-    return () => {
-      audio.removeEventListener("timeupdate", update);
-      audio.removeEventListener("loadedmetadata", loaded);
-    };
-  }, [track, onTrackEnd]);
-
-  const toggle = async () => {
-    const audio = audioRef.current;
-    if (!audio || !track) return;
-    if (audio.paused) { await audio.play(); setPlaying(true); }
-    else { audio.pause(); setPlaying(false); }
-  };
-  const seek = (value: number) => {
-    if (audioRef.current && Number.isFinite(duration)) audioRef.current.currentTime = value;
-    setProgress(value);
-  };
-  const fmt = (n: number) => {
-    if (!Number.isFinite(n)) return "0:00";
-    return `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, "0")}`;
-  };
-
-  return <section className={`deck deck-${accent}`}>
-    <audio ref={audioRef} src={track?.url} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} />
-    <div className="deck-head"><div className="deck-letter">{label}</div><div><div className="eyebrow">PLAYER DECK</div><h2>DECK {label}</h2></div><span className="live-dot">● READY</span></div>
-    <div className="record-area">
-      <div className={`record ${playing ? "spinning" : ""}`}><div className="record-grooves"><div className="record-label"><Disc3 size={42}/><small>{label}</small></div></div></div>
-      <div className="track-meta"><span className="eyebrow">NOW PLAYING</span><strong>{track?.name || "Загрузите трек"}</strong><span className="muted">{track ? "Локальный аудиофайл" : "MP3 · WAV · FLAC · M4A"}</span></div>
-    </div>
-    <div className="waveform" aria-label="Индикатор воспроизведения">
-      {Array.from({length: 72}, (_, i) => <i key={i} style={{height: `${18 + ((i * 37 + (label === "A" ? 13 : 29)) % 76)}%`, opacity: i / 72 < (duration ? progress / duration : 0) ? 1 : .42}} />)}
-    </div>
-    <div className="timeline"><span>{fmt(progress)}</span><input aria-label="Позиция трека" type="range" min="0" max={duration || 100} step=".1" value={Math.min(progress, duration || 100)} onChange={e => seek(Number(e.target.value))}/><span>{fmt(duration)}</span></div>
-    <div className="transport">
-      <button className="icon-btn" title="В начало" onClick={() => seek(0)}><SkipBack size={18}/></button>
-      <button className="play-btn" onClick={toggle} disabled={!track}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button>
-      <button className="icon-btn" title="Cue — в начало" onClick={() => {seek(0); if (audioRef.current) {audioRef.current.pause(); setPlaying(false);} }}><Radio size={18}/></button>
-      <button className="load-btn" onClick={onLoad}><FolderOpen size={16}/> ЗАГРУЗИТЬ</button>
-    </div>
-    <div className="control-grid">
-      <div className="control"><div className="control-label"><span>TEMPO</span><b>{tempo.toFixed(2)}x</b></div><input type="range" min=".8" max="1.2" step=".01" value={tempo} onChange={e => setTempo(Number(e.target.value))}/></div>
-      <div className="control"><div className="control-label"><span>VOLUME</span><b>{volume}%</b></div><input type="range" min="0" max="100" value={volume} onChange={e => setVolume(Number(e.target.value))}/></div>
-    </div>
-    <div className="eq-row">{["LOW","MID","HIGH"].map((name, i) => <label key={name}><span>{name}</span><input aria-label={name} type="range" min="0" max="100" value={eq[i]} onChange={e => setEq(old => old.map((v, j) => i === j ? Number(e.target.value) : v))}/></label>)}</div>
-  </section>;
+export default function App(){
+ const [tracks,setTracks]=useState<Track[]>([]);const [query,setQuery]=useState("");const [a,setA]=useState<Track>();const [b,setB]=useState<Track>();const [bpmA,setBpmA]=useState(128);const [bpmB,setBpmB]=useState(124);const [cross,setCross]=useState(50);const [master,setMaster]=useState(85);const [version,setVersion]=useState("0.1.0");const [status,setStatus]=useState("AUDIO ENGINE READY");const [fx,setFx]=useState("ECHO");const [depth,setDepth]=useState(35);const [time,setTime]=useState(50);
+ useEffect(()=>{window.desktopAPI?.version().then(setVersion).catch(()=>undefined)},[]);
+ const importTracks=async()=>{if(!window.desktopAPI){setStatus("OPEN DESKTOP APP TO IMPORT AUDIO");return}const selected=await window.desktopAPI.chooseFiles();if(selected.length){setTracks(old=>[...old,...selected.filter(n=>!old.some(o=>o.path===n.path))]);setStatus("IMPORTED "+selected.length+" TRACK(S)")}};
+ const load=(t:Track,d:DeckId)=>{d==="A"?setA(t):setB(t);setStatus("LOADED TO DECK "+d)};
+ const syncA=()=>{setBpmA(bpmB);setStatus("DECK A SYNCED TO "+bpmB.toFixed(1)+" BPM")};const syncB=()=>{setBpmB(bpmA);setStatus("DECK B SYNCED TO "+bpmA.toFixed(1)+" BPM")};
+ const filtered=tracks.filter(t=>t.name.toLowerCase().includes(query.toLowerCase()));const gainA=master/100*(cross<=50?1:(100-cross)/50);const gainB=master/100*(cross>=50?1:cross/50);
+ return <main className="app-shell"><header className="topbar"><div className="brand"><div className="brand-mark">A</div><div><strong>AURIX <span>DJ STUDIO</span></strong><small>PROFESSIONAL DJ WORKSPACE</small></div></div><nav className="main-nav"><span className="nav-active"><Headphones size={14}/> PERFORMANCE</span><span><Music2 size={14}/> LIBRARY</span><span><Sparkles size={14}/> FX</span><span><SlidersHorizontal size={14}/> MIXER</span></nav><div className="top-right"><i className="status-light"/> READY <span className="version">v{version}</span><Settings2 size={16}/></div></header>
+ <section className="performance"><Deck id="A" track={a} bpm={bpmA} peerBpm={bpmB} onBpmChange={setBpmA} onSync={syncA} outputGain={gainA} onLoad={importTracks}/>
+ <aside className="mixer"><div className="panel-heading"><SlidersHorizontal size={15}/> CHANNEL MIXER</div><div className="master-meter"><span>MASTER</span><div className="meter-bars">{Array.from({length:22},(_,i)=><i key={i} className={i>17?"hot":""}/>)}</div><b>{master}%</b></div><div className="channel-pair"><div className="channel"><b className="blue-text">A</b><label>GAIN</label><div className="knob"><i/></div><label>FILTER</label><div className="knob small-knob"><i/></div><label>CHANNEL</label></div><div className="channel"><b className="pink-text">B</b><label>GAIN</label><div className="knob"><i/></div><label>FILTER</label><div className="knob small-knob"><i/></div><label>CHANNEL</label></div></div><div className="master-control"><label>MASTER LEVEL <b>{master}%</b></label><input type="range" min="0" max="100" value={master} onChange={e=>setMaster(Number(e.target.value))}/></div><div className="cross-section"><div><span>CROSSFADER</span><b>{cross<48?"DECK A":cross>52?"DECK B":"CENTER"}</b></div><div className="cross-ends"><span>A</span><span>B</span></div><input type="range" min="0" max="100" value={cross} onChange={e=>setCross(Number(e.target.value))}/></div><div className="sync-info"><Waves size={15}/> SYNC LINK <b>{bpmA.toFixed(1)} ↔ {bpmB.toFixed(1)}</b></div></aside>
+ <Deck id="B" track={b} bpm={bpmB} peerBpm={bpmA} onBpmChange={setBpmB} onSync={syncB} outputGain={gainB} onLoad={importTracks}/></section>
+ <section className="bottom-workspace"><aside className="library-nav"><div className="library-brand"><AudioLines size={24}/><b>AURIX</b><small>DJ STUDIO</small></div><div className="nav-item selected"><Music2 size={15}/> All Tracks <b>{tracks.length}</b></div><div className="nav-item"><ListMusic size={15}/> Playlists</div><div className="nav-item"><Clock3 size={15}/> History</div><div className="nav-item"><Heart size={15}/> Favorites</div><button className="add-library" onClick={importTracks}><Plus size={15}/> IMPORT MUSIC</button></aside>
+ <section className="library"><div className="library-head"><div className="panel-heading"><Music2 size={16}/> MUSIC LIBRARY <small>{tracks.length} TRACKS</small></div><div className="search"><Search size={14}/><input placeholder="Search tracks..." value={query} onChange={e=>setQuery(e.target.value)}/></div><button className="add-btn" onClick={importTracks}><Plus size={14}/> ADD</button></div><div className="table-head"><span>#</span><span>TITLE</span><span>FORMAT</span><span>STATUS</span><span>LOAD</span></div><div className="track-list">{filtered.length===0?<div className="empty-library"><FolderOpen size={24}/><b>YOUR LIBRARY IS EMPTY</b><span>Import music files to start mixing</span><button className="load-btn" onClick={importTracks}>IMPORT TRACKS</button></div>:filtered.map((t,i)=><div className="track-row" key={t.path||t.url}><span className="track-index">{String(i+1).padStart(2,"0")}</span><Disc3 size={15}/><span className="track-name">{t.name}</span><span className="file-format">{t.name.split(".").pop()?.toUpperCase()}</span><span className="file-status">READY</span><div className="row-actions"><button onClick={()=>load(t,"A")}>A</button><button onClick={()=>load(t,"B")}>B</button></div></div>)}</div></section>
+ <aside className="fx-panel"><div className="panel-heading"><Zap size={16}/> FX UNIT</div><div className="fx-tabs">{["ECHO","REVERB","FLANGER","FILTER"].map(x=><button key={x} className={fx===x?"fx-selected":""} onClick={()=>setFx(x)}>{x}</button>)}</div><div className="fx-knobs"><label>DEPTH<div className="knob"><i style={{transform:"rotate("+( -130+depth*2.6)+"deg)"}}/></div><input type="range" min="0" max="100" value={depth} onChange={e=>setDepth(Number(e.target.value))}/></label><label>TIME<div className="knob"><i style={{transform:"rotate("+(-130+time*2.6)+"deg)"}}/></div><input type="range" min="0" max="100" value={time} onChange={e=>setTime(Number(e.target.value))}/></label></div><div className="fx-note">Selected effect: <b>{fx}</b><br/>FX panel design is ready; real-time DSP will be added with the audio engine.</div><div className="output-row"><Headphones size={16}/> MASTER OUT <b>{master}%</b></div></aside></section>
+ <footer><span><i className="status-light"/> {status}</span><span>44.1 kHz · LOCAL AUDIO · AURIX DJ STUDIO {version}</span></footer></main>
 }
-
-export default function App() {
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [query, setQuery] = useState("");
-  const [deckA, setDeckA] = useState<Track>();
-  const [deckB, setDeckB] = useState<Track>();
-  const [cross, setCross] = useState(50);
-  const [master, setMaster] = useState(85);
-  const [version, setVersion] = useState("0.1.0");
-  const [status, setStatus] = useState("AUDIO ENGINE READY");
-
-  useEffect(() => { window.desktopAPI?.version().then(setVersion).catch(() => undefined); }, []);
-  const importTracks = async () => {
-    if (!window.desktopAPI) { setStatus("Откройте приложение AURIX для импорта файлов"); return; }
-    const selected = await window.desktopAPI.chooseFiles();
-    if (selected.length) { setTracks(old => [...old, ...selected]); setStatus(`ДОБАВЛЕНО ФАЙЛОВ: ${selected.length}`); }
-  };
-  const load = (track: Track, deck: "A" | "B") => {
-    deck === "A" ? setDeckA(track) : setDeckB(track);
-    setStatus(`ЗАГРУЖЕНО В DECK ${deck}`);
-  };
-  const filtered = tracks.filter(t => t.name.toLowerCase().includes(query.toLowerCase()));
-
-  return <main className="app-shell">
-    <header className="topbar">
-      <div className="brand"><div className="brand-mark"><AudioLines size={24}/></div><div><strong>AURIX <span>DJ STUDIO</span></strong><small>PROFESSIONAL DJ WORKSPACE</small></div></div>
-      <div className="top-status"><span className="status-light"/> {status}</div>
-      <div className="top-actions"><button className="ghost-btn"><Settings2 size={17}/> SETTINGS</button><span className="version">v{version}</span></div>
-    </header>
-    <section className="welcome"><div><div className="eyebrow"><Zap size={13}/> PERFORMANCE MODE</div><h1>PLAY YOUR <em>ENERGY.</em></h1><p>Two decks. One mix. Your sound.</p></div><div className="welcome-orb"><Disc3 size={76}/><span/></div></section>
-    <div className="workspace">
-      <div className="decks">
-        <Deck label="A" accent="cyan" track={deckA} onLoad={importTracks}/>
-        <Deck label="B" accent="violet" track={deckB} onLoad={importTracks}/>
-      </div>
-      <aside className="mixer">
-        <div className="panel-title"><SlidersIcon/> <span>MASTER MIXER</span></div>
-        <div className="master-display"><Volume2 size={22}/><strong>MASTER</strong><b>{master}%</b></div>
-        <input className="vertical-wide" aria-label="Master volume" type="range" min="0" max="100" value={master} onChange={e => setMaster(Number(e.target.value))}/>
-        <div className="mixer-divider"/>
-        <div className="eyebrow">CROSSFADER</div>
-        <div className="cross-labels"><span>DECK A</span><span>DECK B</span></div>
-        <input className="crossfader" aria-label="Crossfader" type="range" min="0" max="100" value={cross} onChange={e => setCross(Number(e.target.value))}/>
-        <div className="cross-value">{cross < 45 ? "A SIDE" : cross > 55 ? "B SIDE" : "CENTER"}</div>
-        <div className="mixer-divider"/>
-        <div className="meter-title">OUTPUT LEVEL</div><div className="meter"><i style={{width: `${Math.min(master, 100)}%`}}/></div>
-        <div className="mixer-note"><Headphones size={17}/><span>Headphone cue routing will be added with the dedicated audio engine.</span></div>
-      </aside>
-    </div>
-    <section className="library">
-      <div className="library-head"><div className="panel-title"><Music2 size={19}/><span>MUSIC LIBRARY</span><small>{tracks.length} TRACKS</small></div><button className="add-btn" onClick={importTracks}><Plus size={17}/> ADD TRACKS</button></div>
-      <div className="library-tools"><div className="search"><Search size={16}/><input placeholder="Поиск по трекам..." value={query} onChange={e => setQuery(e.target.value)}/></div><span className="muted">Локальная сессия · файлы не отправляются в облако</span></div>
-      {filtered.length === 0 ? <div className="empty-library"><div className="empty-icon"><FolderOpen size={26}/></div><strong>Ваша музыкальная библиотека пуста</strong><span>Добавьте аудиофайлы, чтобы начать микширование</span><button className="load-btn" onClick={importTracks}><Plus size={15}/> ИМПОРТИРОВАТЬ МУЗЫКУ</button></div> :
-        <div className="track-list">{filtered.map((track, i) => <div className="track-row" key={track.path || track.url}><span className="track-number">{String(i+1).padStart(2,"0")}</span><Disc3 size={18}/><span className="track-name">{track.name}</span><button onClick={() => load(track,"A")}>LOAD A</button><button onClick={() => load(track,"B")}>LOAD B</button></div>)}</div>}
-    </section>
-    <footer><span>AURIX DJ STUDIO <b>·</b> BUILT FOR THE MIX</span><span>LOCAL AUDIO WORKSPACE</span></footer>
-  </main>;
-}
-
-function SlidersIcon() { return <AudioLines size={19}/>; }
