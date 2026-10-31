@@ -11,6 +11,7 @@ function createWindow() {
     backgroundColor: "#090a12",
     title: "AURIX DJ STUDIO",
     webPreferences: {
+      preload: path.join(__dirname, "src", "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
